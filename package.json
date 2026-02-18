@@ -1,0 +1,19 @@
+{
+  "name": "taiko-liquidity-bot",
+  "version": "1.0.0",
+  "description": "TAIKO CEX Liquidity Monitor — Telegram Alert Bot for Market Makers",
+  "main": "src/bot.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/bot.js",
+    "dev": "node --watch src/bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "node-fetch": "^3.3.2",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
