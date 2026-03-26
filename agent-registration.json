@@ -1,0 +1,16 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "TaikoWatcher Bot",
+  "description": "Telegram bot that monitors $TAIKO token liquidity across 10 centralized exchanges (Binance, Bybit, OKX, KuCoin, Gate.io, HTX, Bitget, MEXC, Upbit, Bithumb). Computes composite liquidity scores, detects anomalies (wide spreads, volume spikes/drops, cross-exchange price gaps, Kimchi premium), and sends real-time alerts to market makers.",
+  "image": "https://raw.githubusercontent.com/Pigitaiko/taikowatcher_bot/main/logo.png",
+  "services": [
+    {
+      "type": "telegram",
+      "url": "https://github.com/Pigitaiko/taikowatcher_bot"
+    }
+  ],
+  "x402Support": false,
+  "active": true,
+  "registrations": [],
+  "supportedTrust": ["reputation"]
+}
