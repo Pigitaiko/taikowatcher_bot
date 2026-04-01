@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: taikowatcher-bot
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ALERT_CHAT_IDS
+        sync: false
+      - key: POLL_INTERVAL_SECONDS
+        value: "120"
+      - key: ALERT_COOLDOWN_MINUTES
+        value: "30"

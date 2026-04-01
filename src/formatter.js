@@ -1,7 +1,8 @@
 // src/formatter.js
-// Formats alerts into rich Telegram messages (HTML parse mode)
+// Formats alerts and digests into Telegram HTML messages
+// Digest format: BPS spreads, depth asymmetry, volume distribution
 
-import { ALERT_TYPES, SEVERITY, fmtUsd, fmtPct } from './alerts.js';
+import { ALERT_TYPES, SEVERITY, fmtUsd, fmtPct, fmtBps } from './alerts.js';
 
 // Severity emoji + label
 const SEV = {
@@ -27,7 +28,7 @@ export function formatAlert(alert, env = {}) {
   let msg = '';
 
   // ── Header ────────────────────────────────────────────────────────────────
-  msg += `${icon} <b>$TAIKO LIQUIDITY ALERT — ${label}</b>\n`;
+  msg += `${icon} <b>$TAIKO ALERT — ${label}</b>\n`;
   msg += `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
 
   // ── Body by type ──────────────────────────────────────────────────────────
@@ -37,8 +38,8 @@ export function formatAlert(alert, env = {}) {
       msg += `📉 <b>LOW LIQUIDITY — ${alert.exchange.toUpperCase()}</b>\n\n`;
       msg += `Exchange:    <code>${alert.exchange}</code>\n`;
       msg += `Liq Score:   <code>${alert.score}/100</code> (threshold: ${alert.threshold})\n`;
-      if (alert.details?.spread != null)
-        msg += `Spread:      <code>${fmtPct(alert.details.spread)}</code>\n`;
+      if (alert.details?.spreadBps != null)
+        msg += `Spread:      <code>${alert.details.spreadBps.toFixed(1)} BPS</code>\n`;
       if (alert.details?.depthPlus)
         msg += `Depth +2%:   <code>${fmtUsd(alert.details.depthPlus)}</code>\n`;
       if (alert.details?.depthMinus)
@@ -50,8 +51,9 @@ export function formatAlert(alert, env = {}) {
     case ALERT_TYPES.WIDE_SPREAD:
       msg += `↔️ <b>WIDE SPREAD — ${alert.exchange.toUpperCase()}</b>\n\n`;
       msg += `Exchange:    <code>${alert.exchange}</code>\n`;
-      msg += `Spread:      <code>${fmtPct(alert.spreadPct)}</code>\n`;
-      msg += `Threshold:   <code>${fmtPct(alert.threshold)}</code>\n`;
+      msg += `Spread:      <code>${alert.spreadBps.toFixed(1)} BPS</code>\n`;
+      msg += `Threshold:   <code>${fmtBps(alert.threshold)}</code>\n`;
+      msg += `Benchmark:   <code>15.3 BPS</code>\n`;
       msg += `Multiple:    <code>${(alert.spreadPct / alert.threshold).toFixed(1)}x above limit</code>\n`;
       break;
 
@@ -60,7 +62,7 @@ export function formatAlert(alert, env = {}) {
       msg += `Exchange:    <code>${alert.exchange}</code>\n`;
       msg += `Previous:    <code>${fmtUsd(alert.prevVol)}</code>\n`;
       msg += `Current:     <code>${fmtUsd(alert.currentVol)}</code>\n`;
-      msg += `Increase:    <code>${alert.ratio.toFixed(1)}x (${((alert.ratio - 1) * 100).toFixed(0)}% up)</code>\n`;
+      msg += `Increase:    <code>${alert.ratio.toFixed(1)}x</code>\n`;
       break;
 
     case ALERT_TYPES.VOLUME_DROP:
@@ -68,12 +70,12 @@ export function formatAlert(alert, env = {}) {
       msg += `Exchange:    <code>${alert.exchange}</code>\n`;
       msg += `Previous:    <code>${fmtUsd(alert.prevVol)}</code>\n`;
       msg += `Current:     <code>${fmtUsd(alert.currentVol)}</code>\n`;
-      msg += `Drop:        <code>${((1 - alert.ratio) * 100).toFixed(0)}% decrease</code>\n`;
+      msg += `Drop:        <code>${((1 - alert.ratio) * 100).toFixed(0)}%</code>\n`;
       break;
 
     case ALERT_TYPES.PRICE_GAP:
       msg += `⚡ <b>CROSS-EXCHANGE PRICE GAP</b>\n\n`;
-      msg += `Gap:         <code>${fmtPct(alert.gapPct)}</code>\n`;
+      msg += `Gap:         <code>${alert.gapBps.toFixed(0)} BPS (${fmtPct(alert.gapPct)})</code>\n`;
       msg += `High:        <code>${alert.highExchange} @ $${alert.highPrice.toFixed(4)}</code>\n`;
       msg += `Low:         <code>${alert.lowExchange}  @ $${alert.lowPrice.toFixed(4)}</code>\n`;
       if (alert.allPrices?.length) {
@@ -84,7 +86,7 @@ export function formatAlert(alert, env = {}) {
       }
       break;
 
-    case ALERT_TYPES.KIMCHI_PREMIUM:
+    case ALERT_TYPES.KIMCHI_PREMIUM: {
       const dir = alert.premiumPct > 0 ? '🌶️ PREMIUM' : '❄️ DISCOUNT';
       msg += `${dir} — ${alert.exchange.toUpperCase()}\n\n`;
       msg += `Exchange:    <code>${alert.exchange}</code>\n`;
@@ -92,13 +94,32 @@ export function formatAlert(alert, env = {}) {
       msg += `Global Avg:  <code>$${alert.globalAvg.toFixed(4)}</code>\n`;
       msg += `Premium:     <code>${alert.premiumPct > 0 ? '+' : ''}${fmtPct(alert.premiumPct)}</code>\n`;
       break;
+    }
 
     case ALERT_TYPES.DEPTH_CRITICAL:
       msg += `💀 <b>CRITICAL DEPTH — ${alert.exchange.toUpperCase()}</b>\n\n`;
       msg += `Exchange:    <code>${alert.exchange}</code>\n`;
       msg += `Depth +2%:   <code>${fmtUsd(alert.depthPlus)}</code>\n`;
       msg += `Depth -2%:   <code>${fmtUsd(alert.depthMinus)}</code>\n`;
-      msg += `⚠️ Book is dangerously thin — any trade causes extreme slippage\n`;
+      msg += `Book is empty — any trade causes extreme slippage\n`;
+      break;
+
+    case ALERT_TYPES.DEPTH_ASYMMETRY:
+      msg += `⚖️ <b>DEPTH ASYMMETRY — ${alert.exchange.toUpperCase()}</b>\n\n`;
+      msg += `Exchange:    <code>${alert.exchange}</code>\n`;
+      msg += `Depth +2%:   <code>${fmtUsd(alert.depthPlus)}</code> (ask/buy side)\n`;
+      msg += `Depth -2%:   <code>${fmtUsd(alert.depthMinus)}</code> (bid/sell side)\n`;
+      msg += `Ratio:       <code>${alert.ratio.toFixed(1)}x</code>\n`;
+      msg += `Heavy side:  <code>${alert.heavySide}</code>\n`;
+      msg += `Light side:  <code>${alert.lightSide}</code>\n`;
+      break;
+
+    case ALERT_TYPES.VOLUME_CONCENTRATION:
+      msg += `📊 <b>VOLUME ANOMALY — ${alert.exchange.toUpperCase()}</b>\n\n`;
+      msg += `Exchange:       <code>${alert.exchange}</code>\n`;
+      msg += `Actual share:   <code>${(alert.actualShare * 100).toFixed(1)}%</code>\n`;
+      msg += `Expected share: <code>${(alert.expectedShare * 100).toFixed(1)}%</code>\n`;
+      msg += `Deviation:      <code>${alert.deviation > 0 ? '+' : ''}${(alert.deviation * 100).toFixed(0)}%</code>\n`;
       break;
 
     default:
@@ -107,11 +128,11 @@ export function formatAlert(alert, env = {}) {
 
   // ── Action line ───────────────────────────────────────────────────────────
   msg += `\n<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n`;
-  msg += `⚡ <b>ACTION REQUIRED:</b>\n${alert.action}\n`;
+  msg += `⚡ <b>ACTION:</b> ${alert.action}\n`;
 
   // ── MM tag ────────────────────────────────────────────────────────────────
   if (mmTag) {
-    msg += `\n👤 <b>CC:</b> ${mmTag} — please address immediately\n`;
+    msg += `\n👤 <b>CC:</b> ${mmTag}\n`;
   }
 
   // ── Footer ────────────────────────────────────────────────────────────────
@@ -122,41 +143,128 @@ export function formatAlert(alert, env = {}) {
 }
 
 /**
- * Format a periodic market status digest (e.g. every hour)
+ * Hourly digest:
+ * 1. Global summary (price, volume, avg spread in BPS)
+ * 2. Exchange health matrix (score, spread BPS, depth, asymmetry, vol share)
+ * 3. Volume distribution vs expected benchmarks
+ * 4. Depth asymmetry summary
  */
 export function formatDigest(markets, globalStats) {
-  if (!markets.length) return '⚠️ No market data available.';
+  if (!markets.length) return 'No market data available.';
 
-  const totalVol   = markets.reduce((s, m) => s + m.volumeUsd, 0);
-  const avgSpread  = markets.reduce((s, m) => s + m.spreadPct, 0) / markets.length;
-  const prices     = markets.filter(m => m.priceUsd > 0);
-  const maxP       = Math.max(...prices.map(m => m.priceUsd));
-  const minP       = Math.min(...prices.map(m => m.priceUsd));
-  const gapPct     = minP > 0 ? (maxP - minP) / minP : 0;
-  const avgScore   = Math.round(markets.reduce((s, m) => s + m.liquidityScore, 0) / markets.length);
-
-  const scoreEmoji = avgScore >= 70 ? '🟢' : avgScore >= 50 ? '🟡' : '🔴';
+  const totalVol     = markets.reduce((s, m) => s + m.volumeUsd, 0);
+  const avgSpreadBps = (markets.reduce((s, m) => s + m.spreadPct, 0) / markets.length) * 10000;
+  const prices       = markets.filter(m => m.priceUsd > 0);
+  const maxP         = Math.max(...prices.map(m => m.priceUsd));
+  const minP         = Math.min(...prices.map(m => m.priceUsd));
+  const gapBps       = minP > 0 ? ((maxP - minP) / minP) * 10000 : 0;
+  const avgScore     = Math.round(markets.reduce((s, m) => s + m.liquidityScore, 0) / markets.length);
+  const scoreEmoji   = avgScore >= 70 ? '🟢' : avgScore >= 50 ? '🟡' : '🔴';
 
   let msg = `📊 <b>$TAIKO LIQUIDITY DIGEST</b>\n`;
   msg += `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
 
+  // ── Section 1: Global Summary ─────────────────────────────────────────────
   if (globalStats?.priceUsd) {
     const chg = globalStats.priceChange24h;
-    const chgStr = chg != null ? ` (${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% 24h)` : '';
-    msg += `💲 Price:    <code>$${globalStats.priceUsd.toFixed(4)}${chgStr}</code>\n`;
+    const chgStr = chg != null ? ` (${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%)` : '';
+    msg += `💲 Price:      <code>$${globalStats.priceUsd.toFixed(4)}${chgStr}</code>\n`;
+  }
+  msg += `📦 24h Vol:    <code>${fmtUsd(totalVol)}</code>\n`;
+  msg += `↔️ Avg Spread: <code>${avgSpreadBps.toFixed(1)} BPS</code>`;
+  msg += avgSpreadBps <= 20 ? ` ✅\n` : avgSpreadBps <= 40 ? ` ⚠️\n` : ` 🔴\n`;
+  msg += `⚡ Price Gap:  <code>${gapBps.toFixed(0)} BPS</code>\n`;
+  msg += `${scoreEmoji} Liq Score:  <code>${avgScore}/100</code>\n\n`;
+
+  // ── Section 2: Exchange Health Matrix ─────────────────────────────────────
+  msg += `<b>Exchange Health:</b>\n`;
+
+  const spotMarkets = markets.filter(m => !m.isFutures);
+  const futuresMarkets = markets.filter(m => m.isFutures);
+  const sortedSpot = [...spotMarkets].sort((a, b) => b.volumeUsd - a.volumeUsd);
+
+  for (const m of sortedSpot) {
+    const si = m.liquidityScore >= 70 ? '🟢' : m.liquidityScore >= 50 ? '🟡' : '🔴';
+    const sprBps = (m.spreadPct * 10000).toFixed(0);
+    const volShare = (m.actualVolShare * 100).toFixed(0);
+
+    msg += `${si} <code>${m.name.padEnd(10)}</code> `;
+    msg += `Score:<code>${String(m.liquidityScore).padStart(2)}</code> `;
+    msg += `Spr:<code>${sprBps.padStart(3)}bps</code> `;
+    msg += `Vol:<code>${fmtUsd(m.volumeUsd).padStart(7)}</code> `;
+    msg += `<code>${volShare.padStart(2)}%</code>\n`;
   }
 
-  msg += `📦 24h Vol:  <code>${fmtUsd(totalVol)}</code> across ${markets.length} exchanges\n`;
-  msg += `↔️ Avg Spread: <code>${fmtPct(avgSpread)}</code>\n`;
-  msg += `⚡ Price Gap: <code>${fmtPct(gapPct)}</code> (${fmtUsd(minP * 10000, true)} – $${maxP.toFixed(4)})\n`;
-  msg += `${scoreEmoji} Liq Score: <code>${avgScore}/100</code>\n\n`;
+  // Futures section
+  if (futuresMarkets.length) {
+    msg += `\n<b>Futures:</b>\n`;
+    for (const m of futuresMarkets) {
+      const si = m.liquidityScore >= 70 ? '🟢' : m.liquidityScore >= 50 ? '🟡' : '🔴';
+      const sprBps = (m.spreadPct * 10000).toFixed(0);
+      msg += `${si} <code>${m.name.padEnd(10)}</code> `;
+      msg += `Score:<code>${String(m.liquidityScore).padStart(2)}</code> `;
+      msg += `Spr:<code>${sprBps.padStart(3)}bps</code> `;
+      msg += `Vol:<code>${fmtUsd(m.volumeUsd).padStart(7)}</code>`;
+      if (m.fundingRate != null) {
+        const frPct = (m.fundingRate * 100).toFixed(4);
+        const frEmoji = m.fundingRate > 0.0001 ? '🔼' : m.fundingRate < -0.0001 ? '🔽' : '➖';
+        msg += ` FR:<code>${frPct}%</code>${frEmoji}`;
+      }
+      msg += `\n`;
+    }
+  }
 
-  msg += `<b>Exchange Breakdown:</b>\n`;
+  // On-chain DEX section
+  const dexMarkets = markets.filter(m => m.isDex);
+  if (dexMarkets.length) {
+    msg += `\n<b>On-chain (Taiko L2):</b>\n`;
+    for (const m of dexMarkets) {
+      const si = m.liquidityScore >= 70 ? '🟢' : m.liquidityScore >= 50 ? '🟡' : '🔴';
+      msg += `${si} <code>${m.name.padEnd(10)}</code> `;
+      msg += `TVL:<code>${fmtUsd(m.totalLiquidity).padStart(7)}</code> `;
+      msg += `Vol:<code>${fmtUsd(m.volumeUsd).padStart(7)}</code> `;
+      msg += `<code>${m.poolCount} pools</code>\n`;
+      // Per-DEX breakdown
+      if (m.dexBreakdown) {
+        const sorted = Object.entries(m.dexBreakdown)
+          .sort(([,a], [,b]) => b.liq - a.liq)
+          .slice(0, 5);
+        for (const [dex, data] of sorted) {
+          const dexName = dex.replace(/-taiko$/, '').replace(/-/g, ' ');
+          if (data.liq > 50) {
+            msg += `   <code>${dexName.padEnd(14)} TVL:${fmtUsd(data.liq).padStart(7)} Vol:${fmtUsd(data.vol).padStart(6)}</code>\n`;
+          }
+        }
+      }
+    }
+  }
 
-  const sorted = [...markets].sort((a, b) => b.liquidityScore - a.liquidityScore);
-  for (const m of sorted) {
-    const si = m.liquidityScore >= 70 ? '🟢' : m.liquidityScore >= 50 ? '🟡' : '🔴';
-    msg += `${si} <code>${m.name.padEnd(10)} Vol:${fmtUsd(m.volumeUsd).padStart(8)}  Score:${String(m.liquidityScore).padStart(3)}/100  Spr:${fmtPct(m.spreadPct)}</code>\n`;
+  // ── Section 3: Volume Distribution vs Expected ───────────────────────────
+  const trackedExchanges = sortedSpot.filter(m => m.expectedVolShare >= 0.01);
+  if (trackedExchanges.length) {
+    msg += `\n<b>Vol Share (Actual vs Benchmark):</b>\n`;
+    for (const m of trackedExchanges) {
+      const actual = (m.actualVolShare * 100).toFixed(1);
+      const expected = (m.expectedVolShare * 100).toFixed(1);
+      const dev = m.volShareDeviation;
+      const status = dev == null ? '➖'
+        : dev > 0.3 ? '⬆️'
+        : dev < -0.3 ? '⬇️'
+        : '✅';
+      msg += `${status} <code>${m.name.padEnd(10)} ${actual.padStart(5)}%  (bench: ${expected.padStart(5)}%)</code>\n`;
+    }
+  }
+
+  // ── Section 4: Depth Asymmetry ────────────────────────────────────────────
+  const withDepth = markets.filter(m => m.depthAsymmetry != null);
+  if (withDepth.length) {
+    msg += `\n<b>Order Book Depth:</b>\n`;
+    for (const m of withDepth.sort((a, b) => b.depthPlus2Pct + b.depthMinus2Pct - a.depthPlus2Pct - a.depthMinus2Pct)) {
+      const ratio = m.depthAsymmetry;
+      const label = ratio > 2 ? 'sell-heavy' : ratio < 0.5 ? 'buy-heavy' : 'balanced';
+      const warn = (ratio > 3 || ratio < 0.33) ? ' ⚠️' : '';
+      msg += `<code>${m.name.padEnd(10)} +2%:${fmtUsd(m.depthPlus2Pct).padStart(7)} -2%:${fmtUsd(m.depthMinus2Pct).padStart(7)} ${ratio.toFixed(1)}x ${label}${warn}</code>\n`;
+    }
   }
 
   const ts = new Date().toUTCString().replace(' GMT', ' UTC');
@@ -169,29 +277,244 @@ export function formatDigest(markets, globalStats) {
  * Format a help message for the /help command
  */
 export function formatHelp() {
-  return `🤖 <b>TAIKO Liquidity Monitor Bot</b>
+  return `🤖 <b>TAIKO Liquidity Monitor</b>
 
 <b>Commands:</b>
-/status — Current liquidity snapshot across all exchanges
-/digest — Full market digest with scores and volumes
-/alerts — List active alert thresholds
-/check [exchange] — Check a specific exchange (e.g. /check mexc)
+/status — Live liquidity snapshot
+/digest — Full market digest with depth + volume analysis
+/alerts — Active alert thresholds
+/check [exchange] — Deep-dive a specific exchange
+/history [exchange] — Price/volume/spread trend (24h)
+/trend [exchange] — Compare metrics across time windows
+/alertlog — Recent alerts fired (24h)
 /help — Show this message
 
 <b>Automatic Alerts:</b>
-The bot monitors CEX liquidity every 2 minutes and fires alerts when:
-• 📉 Liquidity score drops below threshold
-• ↔️ Spread widens beyond normal range
-• 🚀 Volume spikes 2x+ vs previous window
-• ⚡ Price gap opens between exchanges
-• 🌶️ Kimchi premium/discount detected
-• 💀 Order book depth becomes critically thin
+📉 Liquidity score below threshold
+↔️ Spread widens beyond 20 BPS (healthy: ~15 BPS)
+🚀 Volume spike 2x+ vs previous window
+📉 Volume drop &gt;70% from previous
+⚡ Cross-exchange price gap
+🌶️ Kimchi premium/discount
+💀 Order book depth critically thin
+⚖️ Depth asymmetry (one side 3x+ thinner)
+📊 Volume concentration anomaly vs benchmarks
 
-<b>Alert Severity:</b>
-🔴 CRITICAL — Immediate action required
+<b>Severity:</b>
+🔴 CRITICAL — Immediate action
 🟠 HIGH — Action needed within minutes
 🟡 MEDIUM — Monitor closely
 🔵 INFO — Informational
 
-Built for the Taiko community 🥁`;
+You can also ask me anything in natural language 🥁`;
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+//  HISTORICAL DATA FORMATTERS
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Format history data as hourly samples for a specific exchange.
+ */
+export function formatHistory(rows, exchangeName, hours) {
+  if (!rows.length) return `📈 No historical data for ${exchangeName} yet. Data is collected each polling cycle — check back in a few minutes.`;
+
+  // Downsample to ~1 per hour
+  const bucketMs = 3600_000;
+  const sampled = [];
+  let lastBucket = 0;
+  for (const r of rows) {
+    const bucket = Math.floor(r.ts / bucketMs);
+    if (bucket !== lastBucket) {
+      sampled.push(r);
+      lastBucket = bucket;
+    }
+  }
+
+  // Limit to last 24 samples
+  const display = sampled.slice(-24);
+
+  const first = display[0];
+  const last = display[display.length - 1];
+  const priceChg = first.price > 0 ? ((last.price - first.price) / first.price * 100).toFixed(2) : '?';
+  const volChg = first.volume > 0 ? ((last.volume - first.volume) / first.volume * 100).toFixed(0) : '?';
+
+  let msg = `📈 <b>${exchangeName} — ${hours}h History</b>\n`;
+  msg += `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
+  msg += `Price: <code>$${first.price.toFixed(4)} → $${last.price.toFixed(4)} (${priceChg}%)</code>\n`;
+  msg += `Volume: <code>${fmtUsd(first.volume)} → ${fmtUsd(last.volume)} (${volChg}%)</code>\n`;
+  msg += `Spread: <code>${first.spread_bps.toFixed(0)} → ${last.spread_bps.toFixed(0)} BPS</code>\n`;
+  msg += `Score: <code>${first.liq_score} → ${last.liq_score}/100</code>\n\n`;
+
+  msg += `<b>Hourly Samples:</b>\n`;
+  msg += `<code>Time     Price    Vol     Spr  Score</code>\n`;
+  for (const r of display) {
+    const t = new Date(r.ts).toUTCString().slice(17, 22); // HH:MM
+    const p = `$${r.price.toFixed(4)}`;
+    const v = fmtUsd(r.volume).padStart(6);
+    const s = `${r.spread_bps.toFixed(0)}`.padStart(3);
+    const sc = `${r.liq_score}`.padStart(3);
+    msg += `<code>${t}  ${p}  ${v}  ${s}  ${sc}</code>\n`;
+  }
+
+  const ts = new Date().toUTCString().replace(' GMT', ' UTC');
+  msg += `\n<i>${display.length} samples | ${ts}</i>`;
+  return msg;
+}
+
+/**
+ * Format global price history when no exchange specified.
+ */
+export function formatGlobalHistory(rows, hours) {
+  if (!rows.length) return `📈 No global history data yet. Check back in a few minutes.`;
+
+  const bucketMs = 3600_000;
+  const sampled = [];
+  let lastBucket = 0;
+  for (const r of rows) {
+    const bucket = Math.floor(r.ts / bucketMs);
+    if (bucket !== lastBucket) {
+      sampled.push(r);
+      lastBucket = bucket;
+    }
+  }
+
+  const display = sampled.slice(-24);
+  const first = display[0];
+  const last = display[display.length - 1];
+
+  let msg = `📈 <b>$TAIKO Global — ${hours}h History</b>\n`;
+  msg += `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
+
+  if (first.price && last.price) {
+    const chg = ((last.price - first.price) / first.price * 100).toFixed(2);
+    msg += `Price: <code>$${first.price.toFixed(4)} → $${last.price.toFixed(4)} (${chg}%)</code>\n`;
+  }
+
+  msg += `\n<b>Hourly:</b>\n`;
+  msg += `<code>Time     Price     MCap      24h Vol</code>\n`;
+  for (const r of display) {
+    const t = new Date(r.ts).toUTCString().slice(17, 22);
+    const p = r.price ? `$${r.price.toFixed(4)}` : 'N/A   ';
+    const mc = fmtUsd(r.market_cap).padStart(8);
+    const v = fmtUsd(r.total_volume).padStart(8);
+    msg += `<code>${t}  ${p}  ${mc}  ${v}</code>\n`;
+  }
+
+  const ts = new Date().toUTCString().replace(' GMT', ' UTC');
+  msg += `\n<i>${display.length} samples | ${ts}</i>`;
+  return msg;
+}
+
+/**
+ * Format alert log as a list.
+ */
+export function formatAlertLog(rows) {
+  if (!rows.length) return `📋 No alerts in the last 24 hours. All quiet!`;
+
+  const sevEmoji = { CRITICAL: '🔴', HIGH: '🟠', MEDIUM: '🟡', INFO: '🔵' };
+
+  let msg = `📋 <b>Alert Log — Last 24h</b>\n`;
+  msg += `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
+  msg += `<code>${rows.length} alert(s) fired</code>\n\n`;
+
+  for (const [i, r] of rows.entries()) {
+    if (i >= 20) {
+      msg += `\n<i>... and ${rows.length - 20} more</i>`;
+      break;
+    }
+    const time = new Date(r.ts).toUTCString().slice(5, 22); // DD Mon HH:MM
+    const sev = sevEmoji[r.severity] || '⚪';
+    const exch = r.exchange_id || 'global';
+    msg += `${sev} <code>${time}</code> ${r.type}\n   <i>${exch}: ${r.message.slice(0, 80)}</i>\n`;
+  }
+
+  const ts = new Date().toUTCString().replace(' GMT', ' UTC');
+  msg += `\n<i>${ts}</i>`;
+  return msg;
+}
+
+/**
+ * Format trend comparison across time windows.
+ */
+export function formatTrend(trendData, exchangeName) {
+  if (!trendData?.now) return `📊 No trend data for ${exchangeName} yet. Data is collected each polling cycle.`;
+
+  const n = trendData.now;
+  const windows = [
+    ['1h',  trendData.h1],
+    ['6h',  trendData.h6],
+    ['24h', trendData.h24],
+    ['7d',  trendData.d7],
+  ];
+
+  let msg = `📊 <b>${exchangeName} — Trend Analysis</b>\n`;
+  msg += `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
+
+  // Header
+  msg += `<code>           Now   `;
+  for (const [label] of windows) msg += `${label.padStart(7)}  `;
+  msg += `</code>\n`;
+
+  // Price row
+  msg += `<code>Price    $${n.price.toFixed(4)}`;
+  for (const [, snap] of windows) {
+    if (snap) {
+      const chg = ((n.price - snap.price) / snap.price * 100).toFixed(1);
+      const arrow = chg > 0 ? '▲' : chg < 0 ? '▼' : '─';
+      msg += `  ${arrow}${Math.abs(chg).toFixed(1)}%`.padStart(9);
+    } else {
+      msg += `      N/A`;
+    }
+  }
+  msg += `</code>\n`;
+
+  // Volume row
+  msg += `<code>Volume  ${fmtUsd(n.volume).padStart(7)}`;
+  for (const [, snap] of windows) {
+    if (snap && snap.volume > 0) {
+      const chg = ((n.volume - snap.volume) / snap.volume * 100).toFixed(0);
+      const arrow = chg > 0 ? '▲' : chg < 0 ? '▼' : '─';
+      msg += `  ${arrow}${Math.abs(chg)}%`.padStart(9);
+    } else {
+      msg += `      N/A`;
+    }
+  }
+  msg += `</code>\n`;
+
+  // Spread row
+  msg += `<code>Spread  ${n.spread_bps.toFixed(0).padStart(4)}bps`;
+  for (const [, snap] of windows) {
+    if (snap) {
+      const diff = n.spread_bps - snap.spread_bps;
+      const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '─';
+      msg += `  ${arrow}${Math.abs(diff).toFixed(0)}bps`.padStart(9);
+    } else {
+      msg += `      N/A`;
+    }
+  }
+  msg += `</code>\n`;
+
+  // Score row
+  msg += `<code>Score   ${String(n.liq_score).padStart(5)}`;
+  for (const [, snap] of windows) {
+    if (snap) {
+      const diff = n.liq_score - snap.liq_score;
+      const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '─';
+      msg += `    ${arrow}${Math.abs(diff)}`.padStart(9);
+    } else {
+      msg += `      N/A`;
+    }
+  }
+  msg += `</code>\n`;
+
+  // Funding rate for futures
+  if (n.funding_rate != null) {
+    msg += `\n<code>Funding  ${(n.funding_rate * 100).toFixed(4)}%</code>\n`;
+  }
+
+  const ts = new Date().toUTCString().replace(' GMT', ' UTC');
+  msg += `\n<i>${ts}</i>`;
+  return msg;
+}
+

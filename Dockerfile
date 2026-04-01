@@ -13,4 +13,6 @@ COPY src/ ./src/
 RUN addgroup -S botuser && adduser -S botuser -G botuser
 USER botuser
 
+EXPOSE 10000
+
 CMD ["node", "src/bot.js"]
