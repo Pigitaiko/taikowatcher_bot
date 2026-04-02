@@ -54,7 +54,7 @@ const thresholdConfig = {
 
 const POLL_MS    = parseInt(POLL_INTERVAL_SECONDS, 10) * 1000;
 const COOLDOWN_MS = parseInt(ALERT_COOLDOWN_MINUTES, 10) * 60 * 1000;
-const DIGEST_INTERVAL_MS = 30 * 60 * 1000; // digest every 30 minutes
+const DIGEST_INTERVAL_MS = 2 * 60 * 60 * 1000; // digest every 2 hours
 
 // ──────────────────────────────────────────────────────────────────────────────
 //  STATE
