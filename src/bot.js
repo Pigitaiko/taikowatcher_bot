@@ -7,8 +7,8 @@ import TelegramBot from 'node-telegram-bot-api';
 import Anthropic from '@anthropic-ai/sdk';
 import { fetchTaikoMarkets, fetchTaikoGlobalStats } from './fetcher.js';
 import { detectAlerts, filterCooledDown, SEVERITY, fmtUsd, fmtPct, fmtBps } from './alerts.js';
-import { formatAlert, formatDigest, formatHelp, formatHistory, formatGlobalHistory, formatAlertLog, formatTrend } from './formatter.js';
-import { initDb, saveSnapshot, logAlert, purgeOld, getHistory, getGlobalHistory, getAlertLog, getTrend, getRecentTrendSummary, close as closeDb } from './history.js';
+import { formatAlert, formatDigest, formatHelp, formatHistory, formatGlobalHistory, formatAlertLog, formatTrend, formatMmReport } from './formatter.js';
+import { initDb, saveSnapshot, logAlert, purgeOld, getHistory, getGlobalHistory, getAlertLog, getTrend, getRecentTrendSummary, getMmReport, close as closeDb } from './history.js';
 
 // ──────────────────────────────────────────────────────────────────────────────
 //  CONFIG
@@ -470,6 +470,19 @@ bot.onText(/\/alertlog/, async (msg) => {
   await bot.sendMessage(msg.chat.id, reply, { parse_mode: 'HTML' });
 });
 
+bot.onText(/\/mmreport(?:\s+(\d+))?/, async (msg, match) => {
+  const hours = parseInt(match[1] || '24', 10);
+  await bot.sendMessage(msg.chat.id, `⏳ Building MM report (${hours}h)...`);
+
+  try {
+    const rows = getMmReport(hours);
+    const reply = formatMmReport(rows, hours, latestMarkets);
+    await bot.sendMessage(msg.chat.id, reply, { parse_mode: 'HTML' });
+  } catch (err) {
+    await bot.sendMessage(msg.chat.id, `Error: ${err.message}`);
+  }
+});
+
 // ──────────────────────────────────────────────────────────────────────────────
 //  CLAUDE AI — Natural Language Handler
 // ──────────────────────────────────────────────────────────────────────────────
@@ -653,7 +666,7 @@ bot.on('message', (msg) => {
 
   // Skip commands
   if (msg.text.startsWith('/')) {
-    if (!msg.text.match(/^\/(start|help|status|digest|check|alerts|history|trend|alertlog)/)) {
+    if (!msg.text.match(/^\/(start|help|status|digest|check|alerts|history|trend|alertlog|mmreport)/)) {
       // Unknown command — still route to AI
       handleNaturalLanguage(msg);
     }

@@ -287,6 +287,7 @@ export function formatHelp() {
 /history [exchange] — Price/volume/spread trend (24h)
 /trend [exchange] — Compare metrics across time windows
 /alertlog — Recent alerts fired (24h)
+/mmreport [hours] — MM performance report card (default: 24h)
 /help — Show this message
 
 <b>Automatic Alerts:</b>
@@ -515,6 +516,105 @@ export function formatTrend(trendData, exchangeName) {
 
   const ts = new Date().toUTCString().replace(' GMT', ' UTC');
   msg += `\n<i>${ts}</i>`;
+  return msg;
+}
+
+/**
+ * Format MM performance report.
+ * Grades each exchange A-F based on spread, depth, score, and SLA.
+ */
+export function formatMmReport(rows, hours, liveMarkets = []) {
+  if (!rows.length) {
+    return `📊 <b>MM Performance Report</b>\n\nNo historical data yet. The bot needs to run for a few hours to collect enough snapshots.`;
+  }
+
+  // Grading: weighted score 0-100
+  // Spread (40%): 15 BPS = 100, 30 BPS = 50, 60+ BPS = 0
+  // Depth (25%): avg(ask+bid) — $50K+ = 100, $20K = 60, $5K = 20, $0 = 0
+  // Score avg (20%): directly maps to 0-100
+  // SLA (15%): % of time spread <= 20 BPS
+  function grade(row) {
+    const spreadScore = Math.max(0, Math.min(100, (60 - row.avg_spread) / (60 - 10) * 100));
+    const avgDepth = ((row.avg_depth_plus || 0) + (row.avg_depth_minus || 0)) / 2;
+    const depthScore = Math.min(100, (avgDepth / 50000) * 100);
+    const liqScore = row.avg_score || 0;
+    const slaScore = row.spread_sla_pct || 0;
+    const total = spreadScore * 0.40 + depthScore * 0.25 + liqScore * 0.20 + slaScore * 0.15;
+    return { total, spreadScore, depthScore, liqScore, slaScore };
+  }
+
+  function letterGrade(score) {
+    if (score >= 85) return { letter: 'A', emoji: '🟢' };
+    if (score >= 70) return { letter: 'B', emoji: '🟢' };
+    if (score >= 55) return { letter: 'C', emoji: '🟡' };
+    if (score >= 40) return { letter: 'D', emoji: '🟠' };
+    return { letter: 'F', emoji: '🔴' };
+  }
+
+  const graded = rows
+    .filter(r => !r.exchange_id.includes('dex') && !r.exchange_id.includes('_futures'))
+    .map(row => {
+      const scores = grade(row);
+      const { letter, emoji } = letterGrade(scores.total);
+      const live = liveMarkets.find(m => m.exchangeId === row.exchange_id);
+      return { ...row, scores, letter, emoji, live };
+    })
+    .sort((a, b) => b.scores.total - a.scores.total);
+
+  if (!graded.length) {
+    return `📊 <b>MM Performance Report</b>\n\nNo spot exchange data available for grading.`;
+  }
+
+  let msg = `📊 <b>MM PERFORMANCE REPORT (${hours}h)</b>\n`;
+  msg += `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
+
+  // Summary line
+  const avgGrade = graded.reduce((s, g) => s + g.scores.total, 0) / graded.length;
+  const { letter: overallLetter, emoji: overallEmoji } = letterGrade(avgGrade);
+  msg += `${overallEmoji} <b>Overall MM Quality: ${overallLetter} (${avgGrade.toFixed(0)}/100)</b>\n`;
+  msg += `<i>Benchmark: spread ≤15 BPS, depth ≥$20K at ±2%</i>\n\n`;
+
+  for (const g of graded) {
+    const avgDepth = ((g.avg_depth_plus || 0) + (g.avg_depth_minus || 0)) / 2;
+
+    msg += `${g.emoji} <b>${g.exchange_id.charAt(0).toUpperCase() + g.exchange_id.slice(1)}</b> — Grade: <b>${g.letter}</b> (${g.scores.total.toFixed(0)})\n`;
+    msg += `<code>  Spread   ${g.avg_spread.toFixed(1)} BPS avg`;
+    if (g.max_spread > g.avg_spread * 1.5) msg += ` (peak: ${g.max_spread.toFixed(0)})`;
+    msg += `\n`;
+    msg += `  Depth    ${fmtUsd(avgDepth)} avg (ask: ${fmtUsd(g.avg_depth_plus || 0)}, bid: ${fmtUsd(g.avg_depth_minus || 0)})\n`;
+    msg += `  Score    ${g.avg_score.toFixed(0)}/100 avg (low: ${g.min_score}, high: ${g.max_score})\n`;
+    msg += `  SLA      ${g.spread_sla_pct.toFixed(0)}% of time ≤20 BPS\n`;
+    msg += `  Alerts   ${g.alert_count} in ${hours}h</code>\n`;
+
+    if (g.live) {
+      const nowSpread = g.live.spreadBps.toFixed(1);
+      const dir = g.live.spreadBps > g.avg_spread ? '↑' : g.live.spreadBps < g.avg_spread ? '↓' : '→';
+      msg += `  <i>Now: ${nowSpread} BPS ${dir} | Score: ${g.live.liquidityScore}/100</i>\n`;
+    }
+    msg += `\n`;
+  }
+
+  // Futures section
+  const futures = rows.filter(r => r.exchange_id.includes('_futures'));
+  if (futures.length) {
+    msg += `<b>Futures:</b>\n`;
+    for (const f of futures) {
+      const scores = grade(f);
+      const { letter, emoji } = letterGrade(scores.total);
+      msg += `${emoji} <code>${f.exchange_id.replace('_futures', ' F')}: ${f.avg_spread.toFixed(1)} BPS avg, score ${f.avg_score.toFixed(0)}/100 — ${letter}</code>\n`;
+    }
+    msg += `\n`;
+  }
+
+  // Worst offenders
+  const worst = graded.filter(g => g.letter === 'F' || g.letter === 'D');
+  if (worst.length) {
+    msg += `⚠️ <b>Needs attention:</b> ${worst.map(w => w.exchange_id).join(', ')}\n`;
+  }
+
+  const ts = new Date().toUTCString().replace(' GMT', ' UTC');
+  msg += `\n<i>${ts}</i>`;
+
   return msg;
 }
 

@@ -258,6 +258,63 @@ export function getRecentTrendSummary(hours = 6) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+//  QUERY: MM PERFORMANCE REPORT
+// ──────────────────────────────────────────────────────────────────────────────
+export function getMmReport(hours = 24) {
+  if (!db) return [];
+
+  const cutoff = Date.now() - hours * 3600_000;
+
+  // Aggregate per exchange: avg spread, avg depth, avg score, min score, sample count
+  const rows = db.prepare(`
+    SELECT
+      exchange_id,
+      COUNT(*)            AS samples,
+      AVG(spread_bps)     AS avg_spread,
+      MIN(spread_bps)     AS min_spread,
+      MAX(spread_bps)     AS max_spread,
+      AVG(depth_plus)     AS avg_depth_plus,
+      AVG(depth_minus)    AS avg_depth_minus,
+      AVG(liq_score)      AS avg_score,
+      MIN(liq_score)      AS min_score,
+      MAX(liq_score)      AS max_score,
+      AVG(vol_share)      AS avg_vol_share,
+      AVG(volume)         AS avg_volume
+    FROM snapshots
+    WHERE ts > ?
+    GROUP BY exchange_id
+    ORDER BY AVG(spread_bps) ASC
+  `).all(cutoff);
+
+  // SLA: count how many snapshots had spread > 20 BPS per exchange
+  const slaStmt = db.prepare(`
+    SELECT COUNT(*) AS cnt
+    FROM snapshots
+    WHERE exchange_id = ? AND ts > ? AND spread_bps > 20
+  `);
+
+  // Count alerts per exchange
+  const alertStmt = db.prepare(`
+    SELECT COUNT(*) AS cnt
+    FROM alert_log
+    WHERE exchange_id = ? AND ts > ?
+  `);
+
+  for (const row of rows) {
+    const wideCount = slaStmt.get(row.exchange_id, cutoff);
+    row.wide_spread_count = wideCount?.cnt || 0;
+    row.spread_sla_pct = row.samples > 0
+      ? ((row.samples - row.wide_spread_count) / row.samples) * 100
+      : 0;
+
+    const alertCount = alertStmt.get(row.exchange_id, cutoff);
+    row.alert_count = alertCount?.cnt || 0;
+  }
+
+  return rows;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 //  CLEANUP
 // ──────────────────────────────────────────────────────────────────────────────
 export function purgeOld(days = 30) {
